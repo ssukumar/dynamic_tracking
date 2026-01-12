@@ -1,0 +1,237 @@
+#!/usr/bin/env python3
+"""Pygame target visualization for x*(t).
+
+Usage:
+  python3 pygame_target.py            # attempts GUI mode
+  python3 pygame_target.py --headless # runs console mode for verification
+  python3 pygame_target.py --duration 10 --fps 30
+
+Controls in GUI:
+  SPACE - pause/resume
+  C - clear trail
+  ESC or window close - quit
+"""
+
+import sys
+import math
+import time
+import argparse
+
+
+def x_star(t):
+    return (-7.8*math.sin(0.12*t)
+            + 1.6*math.sin(0.28*t)
+            + 9.4*math.sin(0.37*t)
+            - 10.6*math.sin(0.64*t))
+
+
+def run_headless(duration=5.0, fps=20, out_csv=None, speed=1.0):
+    dt = 1.0 / fps
+    t0 = time.time()
+    t = 0.0
+    samples = []
+    print(f"Headless mode: running for {duration}s at {fps} Hz (speed={speed} units/s)")
+    while t < duration:
+        y = x_star(t)
+        x_forward = speed * t
+        print(f"t={t:.3f}, x_forward={x_forward:.6f}, y={y:.6f}")
+        samples.append((t, x_forward, y))
+        time.sleep(dt)
+        t = time.time() - t0
+    if out_csv:
+        try:
+            import csv
+            with open(out_csv, "w", newline="") as f:
+                w = csv.writer(f)
+                w.writerow(["t", "x"])
+                w.writerows(samples)
+            print(f"Saved {len(samples)} samples to {out_csv}")
+        except Exception as e:
+            print("Failed to save CSV:", e)
+    return samples
+
+
+def run_gui(fps=60, pixels_per_unit=12.0, duration=None, lookahead=2.0, lookahead_steps=20, save_video=None):
+    import pygame
+    pygame.init()
+    WIDTH, HEIGHT = 1000, 300
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    pygame.display.set_caption("Moving Target (x*(t))")
+    clock = pygame.time.Clock()
+
+    center_x = WIDTH // 2
+    center_y = HEIGHT // 2
+    radius = 10
+    color = (220, 50, 50)
+    trail = []
+    max_trail = 800
+
+    start_time = time.time()
+    running = True
+    paused = False
+
+    last_pos = (center_x, center_y)
+    last_t = 0.0
+
+    # video writer setup
+    video_writer = None
+    frame_count = 0
+    if save_video:
+        try:
+            import cv2
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            video_writer = cv2.VideoWriter(save_video, fourcc, float(fps), (WIDTH, HEIGHT))
+            print(f"Recording video to {save_video} at {fps} fps")
+        except ImportError:
+            print("cv2 (opencv-python) not available; trying imageio...")
+            try:
+                import imageio
+                video_writer = imageio.get_writer(save_video, fps=fps, codec='libx264')
+                print(f"Recording video to {save_video} at {fps} fps with imageio")
+            except Exception as e:
+                print(f"Video recording unavailable: {e}")
+
+    while running:
+        dt_ms = clock.tick(fps)
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_SPACE:
+                    paused = not paused
+                elif event.key == pygame.K_c:
+                    trail.clear()
+                elif event.key == pygame.K_ESCAPE:
+                    running = False
+
+        # determine current time (respect paused state)
+        if not paused:
+            t = time.time() - start_time
+            last_t = t
+        else:
+            t = last_t
+
+        # vertical motion follows the sinusoidal equation
+        y_units = x_star(t)
+        # horizontal motion advances forward with time
+        x_units = forward_speed * t
+        x_px = int((center_x + x_units * pixels_per_unit) % WIDTH) if wrap else int(center_x + x_units * pixels_per_unit)
+        y_px = int(center_y + y_units * pixels_per_unit)
+
+        # preview (dotted) of future trajectory
+        preview_surf = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        for k in range(1, lookahead_steps + 1):
+            dt_future = (k * (lookahead / float(lookahead_steps)))
+            t_future = t + dt_future
+            y_f = x_star(t_future)
+            x_f_units = forward_speed * t_future
+            x_f_px = int((center_x + x_f_units * pixels_per_unit) % WIDTH) if wrap else int(center_x + x_f_units * pixels_per_unit)
+            y_f_px = int(center_y + y_f * pixels_per_unit)
+            alpha = int(200 * (1.0 - (k / float(lookahead_steps))))
+            # small faded dot for lookahead
+            pygame.draw.circle(preview_surf, (150, 200, 250, alpha), (x_f_px, y_f_px), 3)
+
+        # if wrapping jumps backward, clear trail to avoid drawing long connector lines
+        if wrap and trail and abs(x_px - trail[-1][0]) > WIDTH // 2:
+            trail.clear()
+        last_pos = (x_px, y_px)
+        trail.append(last_pos)
+        if len(trail) > max_trail:
+            trail.pop(0)
+
+        # draw
+        screen.fill((30, 30, 30))
+        # draw lookahead preview first (so trail/target overlay it)
+        screen.blit(preview_surf, (0, 0))
+        if len(trail) > 1:
+            pygame.draw.lines(screen, (100, 200, 250), False, trail, 2)
+        pygame.draw.line(screen, (80, 80, 80), (0, center_y), (WIDTH, center_y), 1)
+        # draw target
+        try:
+            pygame.draw.circle(screen, color, last_pos, radius)
+        except UnboundLocalError:
+            # before first pos set
+            pass
+
+        font = pygame.font.SysFont(None, 20)
+        try:
+            t = time.time() - start_time
+            y_units = x_star(t)
+            x_units = forward_speed * t
+            fps_text = font.render(f"t={t:.2f}s  x={x_units:.2f}u  y={y_units:.2f}u  FPS={clock.get_fps():.0f}", True, (200,200,200))
+            screen.blit(fps_text, (10, 10))
+        except Exception:
+            pass
+        hint = font.render("SPACE: pause  C: clear trail  ESC or close window: quit", True, (150,150,150))
+        screen.blit(hint, (10, HEIGHT-24))
+
+        pygame.display.flip()
+
+        # capture frame for video if recording
+        if video_writer is not None:
+            frame_count += 1
+            # convert pygame surface to numpy array for video writer
+            try:
+                import cv2
+                import numpy as np
+                frame = pygame.surfarray.pixels3d(screen)
+                frame = np.transpose(frame, (1, 0, 2))  # reshape to (height, width, channels)
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                video_writer.write(frame)
+            except ImportError:
+                # fallback: imageio
+                try:
+                    import numpy as np
+                    frame_array = pygame.surfarray.array3d(screen)
+                    frame_array = np.transpose(frame_array, (1, 0, 2))
+                    video_writer.append_data(frame_array)
+                except Exception as e:
+                    pass  # silently skip frame capture on error
+
+        if duration is not None and (time.time() - start_time) > duration:
+            running = False
+
+    # finalize video
+    if video_writer is not None:
+        try:
+            video_writer.release()
+            print(f"Video saved: {save_video} ({frame_count} frames)")
+        except Exception as e:
+            print(f"Error finalizing video: {e}")
+
+    pygame.quit()
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--headless", action="store_true", help="Run in console/headless mode (no GUI)")
+    parser.add_argument("--duration", type=float, default=5.0, help="Duration in seconds (default 5)")
+    parser.add_argument("--fps", type=int, default=30, help="FPS for headless sampling or GUI (default 30)")
+    parser.add_argument("--pixels-per-unit", type=float, default=12.0, help="Pixels per unit for GUI mapping (both axes)")
+    parser.add_argument("--speed", type=float, default=1.0, help="Forward speed in units/sec (default 1.0)")
+    parser.add_argument("--wrap", action="store_true", help="Wrap horizontal position when it moves off-screen")
+    parser.add_argument("--lookahead", type=float, default=2.0, help="Lookahead duration in seconds for preview (GUI)")
+    parser.add_argument("--lookahead-steps", type=int, default=20, help="Number of points to show in lookahead preview (GUI)")
+    parser.add_argument("--out", type=str, help="Optional CSV output path for headless mode")
+    parser.add_argument("--save-video", type=str, help="Save GUI output as MP4 video file (requires opencv-python or imageio)")
+    args = parser.parse_args()
+
+    if args.headless:
+        run_headless(duration=args.duration, fps=args.fps, out_csv=args.out, speed=args.speed)
+        return
+
+    # attempt GUI mode, but be tolerant if pygame display can't initialize
+    try:
+        # store speed and wrap as module-local variables for run_gui
+        global forward_speed, wrap
+        forward_speed = args.speed
+        wrap = args.wrap
+        run_gui(fps=args.fps, pixels_per_unit=args.pixels_per_unit, duration=args.duration,
+            lookahead=args.lookahead, lookahead_steps=args.lookahead_steps, save_video=args.save_video)
+    except Exception as e:
+        print("GUI mode failed or unavailable, falling back to headless. Error:", e)
+        run_headless(duration=args.duration, fps=args.fps, out_csv=args.out)
+
+
+if __name__ == "__main__":
+    main()
