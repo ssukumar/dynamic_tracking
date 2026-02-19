@@ -16,6 +16,9 @@ import sys
 import math
 import time
 import argparse
+import pygame
+from datetime import datetime
+
 
 
 def x_star(t):
@@ -25,7 +28,7 @@ def x_star(t):
             - 10.6*math.sin(0.64*t))
 
 
-def run_headless(duration=5.0, fps=20, out_csv=None, speed=1.0):
+def run_headless(duration=5.0, fps=20, out_csv=None, speed=10.0):
     dt = 1.0 / fps
     t0 = time.time()
     t = 0.0
@@ -51,10 +54,11 @@ def run_headless(duration=5.0, fps=20, out_csv=None, speed=1.0):
     return samples
 
 
-def run_gui(fps=60, pixels_per_unit=12.0, duration=None, lookahead=2.0, lookahead_steps=20, save_video=None):
-    import pygame
-    pygame.init()
-    WIDTH, HEIGHT = 1000, 300
+#def run_gui(fps=60, pixels_per_unit=12.0, duration=None, lookahead=2.0, lookahead_steps=20, save_video=None):
+def run_gui(fps=60, pixels_per_unit=12.0, duration=None,lookahead=2.0,lookahead_steps=20, save_video=None,log_writer=None,trial_id=0,):  
+    #import pygame
+    #pygame.init()
+    WIDTH, HEIGHT = 1500, 1000
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
     pygame.display.set_caption("Moving Target (x*(t))")
     clock = pygame.time.Clock()
@@ -65,6 +69,18 @@ def run_gui(fps=60, pixels_per_unit=12.0, duration=None, lookahead=2.0, lookahea
     color = (220, 50, 50)
     trail = []
     max_trail = 800
+    
+    cursor_radius = 6
+    cursor_surf = pygame.Surface((cursor_radius*2, cursor_radius*2), pygame.SRCALPHA)
+    pygame.draw.circle(
+    cursor_surf,
+    (255, 230, 50),  # yellow
+    (cursor_radius, cursor_radius),
+    cursor_radius
+)
+    pygame.mouse.set_cursor((cursor_radius, cursor_radius), cursor_surf)
+    #pygame.mouse.set_cursor(pygame.SYSTEM_CURSOR_ARROW) # Other options include ARROW, CROSSHAIR, IBEAM, etc.
+    
 
     start_time = time.time()
     running = True
@@ -72,6 +88,12 @@ def run_gui(fps=60, pixels_per_unit=12.0, duration=None, lookahead=2.0, lookahea
 
     last_pos = (center_x, center_y)
     last_t = 0.0
+
+   #import csv
+
+    #log_file = open("tracking_data.csv", "w", newline="")
+    #log_writer = csv.writer(log_file)
+    #log_writer.writerow(["time", "tracker_x", "tracker_y", "mouse_x","mouse_y"])
 
     # video writer setup
     video_writer = None
@@ -90,8 +112,11 @@ def run_gui(fps=60, pixels_per_unit=12.0, duration=None, lookahead=2.0, lookahea
                 print(f"Recording video to {save_video} at {fps} fps with imageio")
             except Exception as e:
                 print(f"Video recording unavailable: {e}")
-
+    ct = 0
     while running:
+        mouse_x, mouse_y = pygame.mouse.get_pos()
+        mouse_x_units = mouse_x / pixels_per_unit
+        mouse_y_units = (center_y - mouse_y) / pixels_per_unit
         dt_ms = clock.tick(fps)
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -103,6 +128,12 @@ def run_gui(fps=60, pixels_per_unit=12.0, duration=None, lookahead=2.0, lookahea
                     trail.clear()
                 elif event.key == pygame.K_ESCAPE:
                     running = False
+        #if ct <=60:
+            #ct +=1
+        #else:
+            #log_writer.writerow([t, x_units, y_units, mouse_x_units, mouse_y_units])
+            #log_writer.writerow([trial_id,t, x_units,y_units,mouse_x_units, mouse_y_units,])
+            #ct = 0
 
         # determine current time (respect paused state)
         if not paused:
@@ -115,7 +146,16 @@ def run_gui(fps=60, pixels_per_unit=12.0, duration=None, lookahead=2.0, lookahea
         y_units = x_star(t)
         # horizontal motion advances forward with time
         x_units = forward_speed * t
-        x_px = int((center_x + x_units * pixels_per_unit) % WIDTH) if wrap else int(center_x + x_units * pixels_per_unit)
+
+        if ct <=60:
+            ct +=1
+        else:
+            timestamp = datetime.now().isoformat()
+            #log_writer.writerow([t, x_units, y_units, mouse_x_units, mouse_y_units])
+            log_writer.writerow([timestamp,trial_id,t, x_units,y_units,mouse_x_units, mouse_y_units,])
+            ct = 0
+
+        x_px = int((x_units * pixels_per_unit) % WIDTH) if wrap else int(x_units * pixels_per_unit)
         y_px = int(center_y + y_units * pixels_per_unit)
 
         # preview (dotted) of future trajectory
@@ -125,7 +165,7 @@ def run_gui(fps=60, pixels_per_unit=12.0, duration=None, lookahead=2.0, lookahea
             t_future = t + dt_future
             y_f = x_star(t_future)
             x_f_units = forward_speed * t_future
-            x_f_px = int((center_x + x_f_units * pixels_per_unit) % WIDTH) if wrap else int(center_x + x_f_units * pixels_per_unit)
+            x_f_px = int((x_f_units * pixels_per_unit) % WIDTH) if wrap else int( x_f_units * pixels_per_unit)
             y_f_px = int(center_y + y_f * pixels_per_unit)
             alpha = int(200 * (1.0 - (k / float(lookahead_steps))))
             # small faded dot for lookahead
@@ -158,7 +198,9 @@ def run_gui(fps=60, pixels_per_unit=12.0, duration=None, lookahead=2.0, lookahea
             t = time.time() - start_time
             y_units = x_star(t)
             x_units = forward_speed * t
-            fps_text = font.render(f"t={t:.2f}s  x={x_units:.2f}u  y={y_units:.2f}u  FPS={clock.get_fps():.0f}", True, (200,200,200))
+            fps_text = font.render( f"t={t:.2f}s  " f"x={x_units:.2f}u  y={y_units:.2f}u  " f"mouse=({mouse_x_units:.2f}u,{mouse_y_units:.2f}u)  " f"FPS={clock.get_fps():.0f}", True, (200, 200, 200))
+            #fps_text = font.render(f"t={t:.2f}s  x={x_units:.2f}u  y={y_units:.2f}u  " f"Mouse=({mouse_x},{mouse_y})  FPS={clock.get_fps():.0f}", True, (200, 200, 200))
+            #fps_text = font.render(f"t={t:.2f}s  x={x_units:.2f}u  y={y_units:.2f}u  FPS={clock.get_fps():.0f}", True, (200,200,200))
             screen.blit(fps_text, (10, 10))
         except Exception:
             pass
@@ -198,8 +240,11 @@ def run_gui(fps=60, pixels_per_unit=12.0, duration=None, lookahead=2.0, lookahea
             print(f"Video saved: {save_video} ({frame_count} frames)")
         except Exception as e:
             print(f"Error finalizing video: {e}")
+    #log_file.close()
 
-    pygame.quit()
+    
+
+#    pygame.quit()
 
 
 def main():
@@ -214,11 +259,21 @@ def main():
     parser.add_argument("--lookahead-steps", type=int, default=20, help="Number of points to show in lookahead preview (GUI)")
     parser.add_argument("--out", type=str, help="Optional CSV output path for headless mode")
     parser.add_argument("--save-video", type=str, help="Save GUI output as MP4 video file (requires opencv-python or imageio)")
+    parser.add_argument("--num_runs", type=int, default=3, help="Number of times to run the GUI")
+
     args = parser.parse_args()
 
     if args.headless:
         run_headless(duration=args.duration, fps=args.fps, out_csv=args.out, speed=args.speed)
         return
+    
+    import csv
+
+    log_file = open("tracking_data.csv", "w", newline="")
+    log_writer = csv.writer(log_file)
+    log_writer.writerow(["clock","trial", "time", "tracker_x", "tracker_y", "mouse_x","mouse_y"])
+
+    pygame.init()
 
     # attempt GUI mode, but be tolerant if pygame display can't initialize
     try:
@@ -226,8 +281,13 @@ def main():
         global forward_speed, wrap
         forward_speed = args.speed
         wrap = args.wrap
-        run_gui(fps=args.fps, pixels_per_unit=args.pixels_per_unit, duration=args.duration,
-            lookahead=args.lookahead, lookahead_steps=args.lookahead_steps, save_video=args.save_video)
+        for i in range(args.num_runs):
+            run_gui(fps=args.fps,pixels_per_unit=args.pixels_per_unit,duration=args.duration,lookahead=args.lookahead,lookahead_steps=args.lookahead_steps,save_video=args.save_video,log_writer=log_writer,trial_id=i,)
+        time.sleep(args.break_duration)
+            #run_gui(fps=args.fps, pixels_per_unit=args.pixels_per_unit, duration=args.duration, lookahead=args.lookahead, lookahead_steps=args.lookahead_steps, save_video=args.save_video)
+        pygame.quit()
+        log_file.close()
+
     except Exception as e:
         print("GUI mode failed or unavailable, falling back to headless. Error:", e)
         run_headless(duration=args.duration, fps=args.fps, out_csv=args.out)
@@ -235,3 +295,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
