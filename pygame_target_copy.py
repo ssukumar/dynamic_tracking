@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 """Pygame target visualization for x*(t).
 
@@ -112,8 +113,11 @@ def get_participant_info(screen, WIDTH, HEIGHT):
         draw_field("Name", name, 240, active == 1)
         draw_field("Age", age, 300, active == 2)
 
-        hint = font.render("TAB = switch fields   ENTER = start", True, (160, 160, 160))
-        screen.blit(hint, (200, 380))
+        hint_lines = ["TAB = switch fields", "ENTER = Begin Game when Ready", "GAME INSTRUCTION: Use your yellow cursor to follow the red tracker during the game."
+]
+        for i, line in enumerate(hint_lines):
+            hint = font.render(line, True, (160, 160, 160))
+            screen.blit(hint, (200, 380 + i*30))  # adjust 30 for line spacing
 
         pygame.display.flip()
         clock.tick(30)
@@ -304,7 +308,42 @@ def run_gui( screen, participant_id, name, age, fps=60, pixels_per_unit=12.0, du
             print(f"Error finalizing video: {e}")
     #log_file.close()
 
-    
+def show_break_screen(screen, duration=5.0, message="Break Time"):
+    """
+    Display a break screen for `duration` seconds with a countdown.
+    """
+    clock = pygame.time.Clock()
+    start_time = time.time()
+    font_large = pygame.font.SysFont(None, 60)
+    font_small = pygame.font.SysFont(None, 40)
+    WIDTH, HEIGHT = screen.get_size()
+
+    while True:
+        elapsed = time.time() - start_time
+        remaining = max(0, duration - elapsed)
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+
+        screen.fill((30, 30, 30))  # dark background
+
+        # break message
+        text_surface = font_large.render(message, True, (255, 255, 0))
+        text_rect = text_surface.get_rect(center=(WIDTH//2, HEIGHT//2 - 30))
+        screen.blit(text_surface, text_rect)
+
+        # countdown
+        countdown_surface = font_small.render(f"Next trial in {int(math.ceil(remaining))} s", True, (200, 200, 200))
+        countdown_rect = countdown_surface.get_rect(center=(WIDTH//2, HEIGHT//2 + 30))
+        screen.blit(countdown_surface, countdown_rect)
+
+        pygame.display.flip()
+        clock.tick(30)
+
+        if elapsed >= duration:
+            break   
 
 def main():
     parser = argparse.ArgumentParser()
@@ -319,6 +358,8 @@ def main():
     parser.add_argument("--out", type=str, help="Optional CSV output path for headless mode")
     parser.add_argument("--save-video", type=str, help="Save GUI output as MP4 video file (requires opencv-python or imageio)")
     parser.add_argument("--num_runs", type=int, default=3, help="Number of times to run the GUI")
+    parser.add_argument("--break-duration", type=float, default=5.0, help="Break time between trials in seconds (default 5)")
+
     args = parser.parse_args()
 
     pygame.init()
@@ -348,7 +389,11 @@ def main():
         forward_speed = args.speed
         wrap = args.wrap
         for i in range(args.num_runs):
-            run_gui(screen, participant_id, name, age, fps=args.fps,pixels_per_unit=args.pixels_per_unit,duration=args.duration,lookahead=args.lookahead,lookahead_steps=args.lookahead_steps,save_video=args.save_video,log_writer=log_writer,trial_id=i,)
+            run_gui(screen, participant_id, name, age, fps=args.fps,pixels_per_unit=args.pixels_per_unit,duration=args.duration,lookahead=args.lookahead,lookahead_steps=args.lookahead_steps,save_video=args.save_video,log_writer=log_writer,trial_id=i)
+            forward_speed = forward_speed * 2
+            if i < args.num_runs - 1:
+                print(f"Trial {i+1} complete. Showing break screen...")
+                show_break_screen(screen, duration=args.break_duration, message=f"Trial {i+1} Complete! Relax for a moment")
             #run_gui(fps=args.fps, pixels_per_unit=args.pixels_per_unit, duration=args.duration, lookahead=args.lookahead, lookahead_steps=args.lookahead_steps, save_video=args.save_video)
         pygame.quit()
         log_file.close()
@@ -360,5 +405,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
