@@ -203,7 +203,8 @@ def run_gui( screen, participant_id, name, age, fps=60, pixels_per_unit=12.0, du
 
         # determine current time (respect paused state)
         if not paused:
-            t = time.time() - start_time
+            t_raw = time.time() - start_time
+            t = t_raw * time_scale
             last_t = t
         else:
             t = last_t
@@ -218,7 +219,8 @@ def run_gui( screen, participant_id, name, age, fps=60, pixels_per_unit=12.0, du
         else:
             timestamp = datetime.now().isoformat()
             #log_writer.writerow([t, x_units, y_units, mouse_x_units, mouse_y_units])
-            log_writer.writerow([timestamp, participant_id, age, trial_id,t, x_units,y_units,mouse_x_units, mouse_y_units,])
+            log_writer.writerow([timestamp,participant_id,age,trial_id, time_scale, lookahead,lookahead_steps,t, x_units, y_units,mouse_x_units, mouse_y_units,])
+            #log_writer.writerow([timestamp, participant_id, age, trial_id,t, x_units,y_units,mouse_x_units, mouse_y_units,])
             ct = 0
 
         x_px = int((x_units * pixels_per_unit) % WIDTH) if wrap else int(x_units * pixels_per_unit)
@@ -377,20 +379,22 @@ def main():
 
     log_file = open("tracking_data.csv", "w", newline="")
     log_writer = csv.writer(log_file)
-    log_writer.writerow(["clock", "participant_id", "age", "trial", "time", "target_x", "target_y", "cursor_x","cursor_y"])
-
+    #log_writer.writerow(["clock", "participant_id", "age", "trial", "time", "target_x", "target_y", "cursor_x","cursor_y"])
+    log_writer.writerow(["clock", "participant_id", "age", "trial", "speed", "lookahead", "lookahead_steps", "time", "target_x", "target_y", "cursor_x", "cursor_y"])
     #pygame.init()
     pygame.display.flip()
 
     # attempt GUI mode, but be tolerant if pygame display can't initialize
     try:
         # store speed and wrap as module-local variables for run_gui
-        global forward_speed, wrap
-        forward_speed = args.speed
+        global time_scale, forward_speed, wrap
+        time_scale = args.speed      # speed now scales time
+        forward_speed = 1.0          # keep horizontal geometry fixed
         wrap = args.wrap
         for i in range(args.num_runs):
             run_gui(screen, participant_id, name, age, fps=args.fps,pixels_per_unit=args.pixels_per_unit,duration=args.duration,lookahead=args.lookahead,lookahead_steps=args.lookahead_steps,save_video=args.save_video,log_writer=log_writer,trial_id=i)
-            forward_speed = forward_speed * 2
+            #forward_speed = forward_speed * 2
+            time_scale = time_scale * 1.5
             if i < args.num_runs - 1:
                 print(f"Trial {i+1} complete. Showing break screen...")
                 show_break_screen(screen, duration=args.break_duration, message=f"Trial {i+1} Complete! Relax for a moment")
